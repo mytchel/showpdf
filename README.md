@@ -1,4 +1,4 @@
 showpdf
 =======
 
-A GTK pdf files viewer
+A GTK pdf viewer. Is is my own pdf viewer.
