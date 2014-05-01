@@ -22,7 +22,7 @@
 #define TMP_PAGES_FILE "/tmp/pages_file"
 
 PopplerDocument *doc;
-PopplerPage *page;
+PopplerPage *page, *prev, *next;
 int pages, current, yoffset;
 gchar *file_name;
 double page_width, page_height;
@@ -105,6 +105,18 @@ void on_destroy(GtkWidget *w, gpointer data) {
     save_current_page();
 }
 
+void render_pages(cairo_t *cr) {
+   poppler_page_render(page, cr);
+
+   if (yoffset < 0) {
+       cairo_translate(cr, 0, page_height);
+       poppler_page_render(next, cr);
+    } else {
+        cairo_translate(cr, 0, -page_height);
+        poppler_page_render(prev, cr);
+    }
+}
+
 gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     double top, left, right, bottom;
     double scalex = 1, scaley = 1;
@@ -138,11 +150,11 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     if (page_width * scalex < win_width)
         xoffset = win_width / 2 - page_width * scalex / 2;
 
-    cairo_translate(cr, xoffset, yoffset);
+    cairo_translate(cr, xoffset, yoffset * page_height / STEPS);
  
     cairo_scale(cr, scalex, scaley);
 
-    poppler_page_render(page, cr);
+    render_pages(cr);
     
     cairo_destroy(cr);
     return FALSE;
@@ -150,8 +162,8 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
 
 gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
     switch (e->key.keyval) {
-        case GDK_k: yoffset += page_height / STEPS; break;
-        case GDK_j: yoffset -= page_height / STEPS; break;
+        case GDK_k: yoffset += 1; break;
+        case GDK_j: yoffset -= 1; break;
         case GDK_c: yoffset = 0; break;
         case GDK_Page_Up: current -= (current > 0) ? 1 : 0; break;
         case GDK_Page_Down: current += (current + 1 < pages) ? 1 : 0; break;
@@ -163,7 +175,17 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
         case GDK_f: mode = MODE_FIT; break;
         case GDK_q: on_destroy(NULL, NULL); break;
     }
-    
+
+    if (yoffset < -STEPS) {
+        yoffset = 0;
+        if (current < pages - 1)
+            current++;
+    } else if (yoffset > STEPS) {
+        yoffset = 0;
+        if (current > 0) 
+            current--;
+    }
+
     g_object_unref(page);
     page = poppler_document_get_page(doc, current);
     if (!page) {
@@ -171,9 +193,18 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
         g_object_unref(page);
         exit(EXIT_FAILURE);
     }
+
+    prev = next = NULL;
+    if (current > 0)
+        prev = poppler_document_get_page(doc, current - 1);
+    if (current < pages -1)
+        next = poppler_document_get_page(doc, current + 1);
   
     poppler_page_get_size(page, &page_width, &page_height);
-    on_expose(w, NULL, NULL); return FALSE;
+   
+    on_expose(w, NULL, NULL);
+    
+    return FALSE;
 }
 
 int main(int argc, char **argv) {
