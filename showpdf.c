@@ -15,11 +15,15 @@
 #define BACKGROUND_G 1
 #define BACKGROUND_B 1
 
-#define PAGE_FILE "/home/mytchel/.config/showpdf"
+// Number of steps in a page.
+#define STEPS 15
+
+#define PAGES_FILE "/home/mytchel/.config/showpdf"
+#define TMP_PAGES_FILE "/tmp/pages_file"
 
 PopplerDocument *doc;
 PopplerPage *page;
-int pages, current = 0;
+int pages, current, yoffset;
 gchar *file_name;
 double page_width, page_height;
 int mode = MODE_HEIGHT;
@@ -31,7 +35,7 @@ void get_current_page() {
     
     current = 0;
 
-    page_file = fopen(PAGE_FILE, "r");
+    page_file = fopen(PAGES_FILE, "r");
     if (!page_file) {
         printf("No saved page file!!!\n");
         return;
@@ -43,24 +47,20 @@ void get_current_page() {
 
         if (strcmp(name, file_name) == 0) {
             current = atoi(page_str);
-            fclose(page_file);
-            return;
+            break;
         }
     }
 
     fclose(page_file);
-    printf("Could not find a saved page for this file\n");
 }
 
 void save_current_page() {
     FILE *page_file, *tmp_file;
-    char line[4096];
-    char *name, *page_str;
+    char line[4096], *name;
     int page_num;
 
-    page_file = fopen(PAGE_FILE, "r");
-    tmp_file = fopen("/tmp/showpdf", "w");
-    
+    page_file = fopen(PAGES_FILE, "r");
+    tmp_file = fopen(TMP_PAGES_FILE, "w");
     if (!page_file || !tmp_file) {
         printf("ERROR opening files for saving current page\n");
         return;
@@ -68,8 +68,7 @@ void save_current_page() {
 
     while ((fgets(line, sizeof(char) * 4096, page_file)) != NULL) {
         name = strtok(line, ":");
-        page_str = strtok(NULL, ":");
-        page_num = atoi(page_str);
+        page_num = atoi(strtok(NULL, ":"));
 
         if (strcmp(name, file_name) == 0) {
             page_num = current;
@@ -85,9 +84,8 @@ void save_current_page() {
     fclose(page_file);
     fclose(tmp_file);
 
-    page_file = fopen(PAGE_FILE, "w");
-    tmp_file = fopen("/tmp/showpdf", "r");
-    
+    page_file = fopen(PAGES_FILE, "w");
+    tmp_file = fopen(TMP_PAGES_FILE, "r");
     if (!page_file || !tmp_file) {
         printf("ERROR opening files for saving current page\n");
         return;
@@ -98,6 +96,8 @@ void save_current_page() {
 
     fclose(page_file);
     fclose(tmp_file);
+
+    remove(TMP_PAGES_FILE);
 }
 
 void on_destroy(GtkWidget *w, gpointer data) {
@@ -108,6 +108,7 @@ void on_destroy(GtkWidget *w, gpointer data) {
 gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     double top, left, right, bottom;
     double scalex = 1, scaley = 1;
+    int xoffset;
     
     gtk_widget_queue_draw(w);
     gint win_width, win_height;
@@ -123,9 +124,8 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     }
     
     cairo_t *cr = gdk_cairo_create(w->window);
-    cairo_scale(cr, scalex, scaley);
 
-    // clear window.
+    // clear window. This is needed for some pdf's, probably just bad ones that I find.
     top = left = 0;
     right = win_width;
     bottom = win_height;
@@ -134,15 +134,27 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     cairo_fill(cr);
     cairo_paint(cr);
 
+    xoffset = 0;
+    if (page_width * scalex < win_width)
+        xoffset = win_width / 2 - page_width * scalex / 2;
+
+    cairo_translate(cr, xoffset, yoffset);
+ 
+    cairo_scale(cr, scalex, scaley);
+
     poppler_page_render(page, cr);
+    
     cairo_destroy(cr);
     return FALSE;
 }
 
 gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
     switch (e->key.keyval) {
-        case GDK_k: current -= (current > 0) ? 1 : 0; break;
-        case GDK_j: current += (current + 1 < pages) ? 1 : 0; break;
+        case GDK_k: yoffset += page_height / STEPS; break;
+        case GDK_j: yoffset -= page_height / STEPS; break;
+        case GDK_c: yoffset = 0; break;
+        case GDK_Page_Up: current -= (current > 0) ? 1 : 0; break;
+        case GDK_Page_Down: current += (current + 1 < pages) ? 1 : 0; break;
         case GDK_Home: current = 0; break;
         case GDK_End: current = pages - 1; break;
         case GDK_space: current += (current + 1 < pages) ? 1 : 0; break;
