@@ -23,7 +23,7 @@
 
 PopplerDocument *doc;
 PopplerPage *page, *prev, *next;
-int pages, current, yoffset;
+int pages, current, yoffset, oldcurrent = -1;
 gchar *file_name;
 double page_width, page_height;
 int mode = MODE_HEIGHT;
@@ -108,10 +108,10 @@ void on_destroy(GtkWidget *w, gpointer data) {
 void render_pages(cairo_t *cr) {
    poppler_page_render(page, cr);
 
-   if (yoffset < 0) {
+   if (yoffset < 0 && next) {
        cairo_translate(cr, 0, page_height);
        poppler_page_render(next, cr);
-    } else {
+    } else if (prev) {
         cairo_translate(cr, 0, -page_height);
         poppler_page_render(prev, cr);
     }
@@ -150,7 +150,7 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     if (page_width * scalex < win_width)
         xoffset = win_width / 2 - page_width * scalex / 2;
 
-    cairo_translate(cr, xoffset, yoffset * page_height / STEPS);
+    cairo_translate(cr, xoffset, yoffset * win_height / STEPS);
  
     cairo_scale(cr, scalex, scaley);
 
@@ -176,32 +176,40 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
         case GDK_q: on_destroy(NULL, NULL); break;
     }
 
-    if (yoffset < -STEPS) {
-        yoffset = 0;
+    if (yoffset < 0) {
+        yoffset = STEPS - 1;
         if (current < pages - 1)
             current++;
     } else if (yoffset > STEPS) {
-        yoffset = 0;
+        yoffset = 1;
         if (current > 0) 
             current--;
     }
 
-    g_object_unref(page);
-    page = poppler_document_get_page(doc, current);
-    if (!page) {
-        puts("Could not open page of document");
+    if (oldcurrent != current) {
         g_object_unref(page);
-        exit(EXIT_FAILURE);
+        page = poppler_document_get_page(doc, current);
+        if (!page) {
+            puts("Could not open page of document");
+            g_object_unref(page);
+            exit(EXIT_FAILURE);
+        }
+
+        if (prev)
+            g_object_unref(prev);
+        if (next)
+            g_object_unref(next);
+        prev = next = NULL;
+        if (current > 0)
+            prev = poppler_document_get_page(doc, current - 1);
+        if (current < pages -1)
+            next = poppler_document_get_page(doc, current + 1);
+
+        poppler_page_get_size(page, &page_width, &page_height);
+
+        oldcurrent = current;
     }
 
-    prev = next = NULL;
-    if (current > 0)
-        prev = poppler_document_get_page(doc, current - 1);
-    if (current < pages -1)
-        next = poppler_document_get_page(doc, current + 1);
-  
-    poppler_page_get_size(page, &page_width, &page_height);
-   
     on_expose(w, NULL, NULL);
     
     return FALSE;
