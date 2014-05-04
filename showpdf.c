@@ -38,6 +38,11 @@ void get_current_page() {
     page_file = fopen(PAGES_FILE, "r");
     if (!page_file) {
         printf("No saved page file!!!\n");
+        page_file = fopen(PAGES_FILE, "w");
+        if (!page_file)
+            printf("Could not write to \"%s\"\n", PAGES_FILE);
+        else
+            fclose(page_file);
         return;
     }
 
@@ -105,24 +110,14 @@ void on_destroy(GtkWidget *w, gpointer data) {
     save_current_page();
 }
 
-void render_pages(cairo_t *cr) {
-   poppler_page_render(page, cr);
-
-   if (yoffset < 0 && next) {
-       cairo_translate(cr, 0, page_height);
-       poppler_page_render(next, cr);
-    } else if (prev) {
-        cairo_translate(cr, 0, -page_height);
-        poppler_page_render(prev, cr);
-    }
-}
-
 gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     double top, left, right, bottom;
     double scalex = 1, scaley = 1;
     int xoffset;
-    
-    gtk_widget_queue_draw(w);
+   
+    // This causes the expose event to be triggered repeatidly on slackware (but not arch) causing
+    // a noticable lag. So I've removed it for now.
+    //gtk_widget_queue_draw(w);
     gint win_width, win_height;
     gtk_window_get_size(GTK_WINDOW(w), &win_width, &win_height);
    
@@ -134,7 +129,7 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
             scaley = win_height / page_height;
             break;
     }
-    
+
     cairo_t *cr = gdk_cairo_create(w->window);
 
     // clear window. This is needed for some pdf's, probably just bad ones that I find.
@@ -151,11 +146,18 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
         xoffset = win_width / 2 - page_width * scalex / 2;
 
     cairo_translate(cr, xoffset, yoffset * win_height / STEPS);
- 
     cairo_scale(cr, scalex, scaley);
 
-    render_pages(cr);
-    
+    poppler_page_render(page, cr);
+
+    if (yoffset < 0 && next) {
+        cairo_translate(cr, 0, page_height);
+        poppler_page_render(next, cr);
+    } else if (prev) {
+        cairo_translate(cr, 0, -page_height);
+        poppler_page_render(prev, cr);
+    }
+ 
     cairo_destroy(cr);
     return FALSE;
 }
@@ -187,6 +189,7 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
     }
 
     if (oldcurrent != current) {
+        printf("Load new pages you lazy bastards!!!\n");
         g_object_unref(page);
         page = poppler_document_get_page(doc, current);
         if (!page) {
@@ -270,4 +273,6 @@ int main(int argc, char **argv) {
     gtk_main();
     g_object_unref(page);
     g_object_unref(doc);
+
+    return 0;
 }
