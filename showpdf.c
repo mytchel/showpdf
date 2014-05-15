@@ -7,6 +7,8 @@
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
 
+#define LEN(X) (sizeof(X)/sizeof(*X))
+
 #define MODE_HEIGHT 1
 #define MODE_WIDTH  2
 #define MODE_FIT    3
@@ -21,12 +23,89 @@
 #define PAGES_FILE "/home/mytchel/.config/showpdf"
 #define TMP_PAGES_FILE "/tmp/pages_file"
 
+typedef struct key key;
+struct key {
+    int key;
+    void (*function)(int a);
+    int arg;
+};
+
+void step_down();
+void step_up();
+void page_down();
+void page_up();
+void quit();
+void center();
+void start();
+void end();
+void set_mode(int m);
+
+void get_current_page();
+void save_current_page();
+void on_destroy(GtkWidget *w, gpointer data);
+gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data);
+gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data);
+
+struct key keys[] = {
+    { GDK_j, step_down, 0},
+    { GDK_k, step_up, 0},
+    { GDK_J, page_down, 0},
+    { GDK_K, page_up, 0},
+
+    { GDK_c, center, 0},
+    { GDK_Home, start, 0},
+    { GDK_End, end, 0},
+    { GDK_w, set_mode, MODE_WIDTH},
+    { GDK_h, set_mode, MODE_HEIGHT},
+    { GDK_f, set_mode, MODE_FIT},
+
+    { GDK_q, quit},
+};
+
 PopplerDocument *doc;
 PopplerPage *page, *prev, *next;
 int pages, current, yoffset, oldcurrent = -1;
 gchar *file_name;
 double page_width, page_height;
 int mode = MODE_HEIGHT;
+
+void step_down() {
+    yoffset--;
+}
+
+void step_up() {
+    yoffset++;
+}
+
+void page_down() {
+    if (current < pages - 1)
+        current++;
+}
+
+void page_up() {
+    if (current > 0)
+        current--;
+}
+
+void quit() {
+    on_destroy(NULL, NULL);
+}
+
+void center() {
+    yoffset = 0;
+}
+
+void start() {
+    current = 0;
+}
+
+void end() {
+    current = pages - 1;
+}
+
+void set_mode(int m) {
+    mode = m;
+};
 
 void get_current_page() {
     char line[4096];
@@ -120,7 +199,7 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     //gtk_widget_queue_draw(w);
     gint win_width, win_height;
     gtk_window_get_size(GTK_WINDOW(w), &win_width, &win_height);
-   
+  
     switch (mode) {
         case MODE_HEIGHT: scalex = scaley = win_height / page_height; break;
         case MODE_WIDTH:  scalex = scaley  = win_width  / page_width;  break;
@@ -131,13 +210,15 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     }
 
     cairo_t *cr = gdk_cairo_create(w->window);
+    cairo_matrix_t matrix;
+    cairo_get_matrix(cr, &matrix);
 
     // clear window. This is needed for some pdf's, probably just bad ones that I find.
     top = left = 0;
     right = win_width;
     bottom = win_height;
     cairo_set_source_rgb(cr, BACKGROUND_R, BACKGROUND_G, BACKGROUND_B);
-    cairo_fill_extents(cr, &top, &left, &right, &bottom);
+    cairo_fill_extents(cr, &left, &top, &right, &bottom);
     cairo_fill(cr);
     cairo_paint(cr);
 
@@ -157,25 +238,27 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
         cairo_translate(cr, 0, -page_height);
         poppler_page_render(prev, cr);
     }
+
+    cairo_set_matrix(cr,&matrix);
  
+    char message[512];
+    sprintf(message, "Page %i of %i", current, pages);
+
+    cairo_move_to(cr, 10, win_height - 10);
+    cairo_set_source_rgb(cr, 0, 0, 0);
+    cairo_show_text(cr, message);
+
     cairo_destroy(cr);
     return FALSE;
 }
 
 gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
-    switch (e->key.keyval) {
-        case GDK_k: yoffset += 1; break;
-        case GDK_j: yoffset -= 1; break;
-        case GDK_c: yoffset = 0; break;
-        case GDK_Page_Up: current -= (current > 0) ? 1 : 0; break;
-        case GDK_Page_Down: current += (current + 1 < pages) ? 1 : 0; break;
-        case GDK_Home: current = 0; break;
-        case GDK_End: current = pages - 1; break;
-        case GDK_space: current += (current + 1 < pages) ? 1 : 0; break;
-        case GDK_w: mode = MODE_WIDTH; break;
-        case GDK_h: mode = MODE_HEIGHT; break;
-        case GDK_f: mode = MODE_FIT; break;
-        case GDK_q: on_destroy(NULL, NULL); break;
+    int i;
+    for (i = 0; i < LEN(keys); i++) {
+        if (keys[i].key == e->key.keyval) {
+            keys[i].function(keys[i].arg);
+            break;
+        }
     }
 
     if (yoffset < 0) {
@@ -189,7 +272,6 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
     }
 
     if (oldcurrent != current) {
-        printf("Load new pages you lazy bastards!!!\n");
         g_object_unref(page);
         page = poppler_document_get_page(doc, current);
         if (!page) {
