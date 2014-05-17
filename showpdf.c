@@ -20,8 +20,8 @@
 // Number of steps in a page.
 #define STEPS 15
 
-#define PAGES_FILE "/home/mytchel/.config/showpdf"
-#define TMP_PAGES_FILE "/tmp/pages_file"
+#define PAGES_FILE ".config/showpdf"
+#define TMP_PAGES "/tmp/showpdf_pages_tmp"
 
 typedef struct key key;
 struct key {
@@ -65,9 +65,10 @@ struct key keys[] = {
 PopplerDocument *doc;
 PopplerPage *page, *prev, *next;
 int pages, current, yoffset, oldcurrent = -1;
-gchar *file_name;
 double page_width, page_height;
 int mode = MODE_HEIGHT;
+gchar *file_name;
+char save_file_path[2048];
 
 void step_down() {
     yoffset--;
@@ -114,12 +115,12 @@ void get_current_page() {
     
     current = 0;
 
-    page_file = fopen(PAGES_FILE, "r");
+    page_file = fopen(save_file_path, "r");
     if (!page_file) {
         printf("No saved page file!!!\n");
-        page_file = fopen(PAGES_FILE, "w");
+        page_file = fopen(save_file_path, "w");
         if (!page_file)
-            printf("Could not write to \"%s\"\n", PAGES_FILE);
+            printf("Could not write to \"%s\"\n", save_file_path);
         else
             fclose(page_file);
         return;
@@ -143,10 +144,10 @@ void save_current_page() {
     char line[4096], *name;
     int page_num;
 
-    page_file = fopen(PAGES_FILE, "r");
-    tmp_file = fopen(TMP_PAGES_FILE, "w");
+    page_file = fopen(save_file_path, "r");
+    tmp_file = fopen(TMP_PAGES, "w");
     if (!page_file || !tmp_file) {
-        printf("ERROR opening files for saving current page\n");
+        printf("ERROR openings file for saving current page\n");
         return;
     }
 
@@ -154,34 +155,26 @@ void save_current_page() {
         name = strtok(line, ":");
         page_num = atoi(strtok(NULL, ":"));
 
-        if (strcmp(name, file_name) == 0) {
-            page_num = current;
-            current = -1;
-        }
-
-        fprintf(tmp_file, "%s:%i\n", name, page_num);
+        if (strcmp(name, file_name) != 0)
+            fprintf(tmp_file, "%s:%i\n", name, page_num);
     }
 
-    if (current != -1)
-        fprintf(tmp_file, "%s:%i\n", file_name, current);
+    fprintf(tmp_file, "%s:%i\n", file_name, current);
 
     fclose(page_file);
     fclose(tmp_file);
-
-    page_file = fopen(PAGES_FILE, "w");
-    tmp_file = fopen(TMP_PAGES_FILE, "r");
+    page_file = fopen(save_file_path, "w");
+    tmp_file = fopen(TMP_PAGES, "r");
     if (!page_file || !tmp_file) {
-        printf("ERROR opening files for saving current page\n");
-        return;
+        printf("ERROR openings file for saving current page\n");
     }
 
     while ((fgets(line, sizeof(char) * 4096, tmp_file)) != NULL)
-        fprintf(page_file, line);
+        fprintf(page_file, "%s", line);
 
     fclose(page_file);
     fclose(tmp_file);
-
-    remove(TMP_PAGES_FILE);
+    remove(TMP_PAGES);
 }
 
 void on_destroy(GtkWidget *w, gpointer data) {
@@ -319,6 +312,8 @@ int main(int argc, char **argv) {
     }
 
     file_name = g_strdup(absolute);
+
+    sprintf(save_file_path, "%s/%s", getenv("HOME"), PAGES_FILE);
 
     gchar *uri = g_filename_to_uri (absolute, NULL, &err);
     free (absolute);
