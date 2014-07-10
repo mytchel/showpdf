@@ -39,6 +39,8 @@ void center();
 void start();
 void end();
 void set_mode(int m);
+void search();
+void search_next(int direction);
 
 void get_current_page();
 void save_current_page();
@@ -49,8 +51,15 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data);
 struct key keys[] = {
     { GDK_j, step_down, 0},
     { GDK_k, step_up, 0},
+
     { GDK_J, page_down, 0},
     { GDK_K, page_up, 0},
+    { GDK_Page_Down, page_down, 0},
+    { GDK_Page_Up, page_up, 0},
+
+    { GDK_slash, search, 0},
+    { GDK_n, search_next, 1},
+    { GDK_N, search_next, -1},
 
     { GDK_c, center, 0},
     { GDK_Home, start, 0},
@@ -68,6 +77,10 @@ int pages, current, yoffset, oldcurrent = -1;
 gchar *file_name;
 double page_width, page_height;
 int mode = MODE_HEIGHT;
+
+int *search_pages;
+int search_n, search_c;
+char *search_text;
 
 void step_down() {
     yoffset--;
@@ -105,7 +118,45 @@ void end() {
 
 void set_mode(int m) {
     mode = m;
-};
+}
+
+void search() {
+    int p;
+    PopplerPage *check_page;
+    search_c = 0;
+    search_n = 0;
+
+    search_text = "Ender";
+
+    for (p = 0; p < pages; p++) {
+        check_page = poppler_document_get_page(doc, p);
+        if (!check_page) {
+            puts("Could not open page of document");
+            g_object_unref(page);
+            exit(EXIT_FAILURE);
+        }
+
+        GList *list = poppler_page_find_text(check_page, search_text);
+        if (list != NULL) {
+            search_n++;
+            search_pages = realloc(search_pages, sizeof(int) * search_n);
+            search_pages[search_n - 1] = p;
+        } 
+        
+        g_object_unref(check_page);
+    }
+}
+
+void search_next(int direction) {
+    if (search_n == 0 || search_pages == NULL) return;
+    
+    if (direction > 0) search_c++;
+    else search_c--;
+   
+    if (search_c >= search_n) search_c = 0;
+    if (search_c < 0) search_n = search_n - 1;
+    current = search_pages[search_c]; 
+}
 
 void get_current_page() {
     char line[4096];
@@ -190,9 +241,9 @@ void on_destroy(GtkWidget *w, gpointer data) {
 }
 
 gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
-    double top, left, right, bottom;
     double scalex = 1, scaley = 1;
     int xoffset;
+    int i;
    
     // This causes the expose event to be triggered repeatidly on slackware (but not arch) causing
     // a noticable lag. So I've removed it for now.
@@ -214,11 +265,19 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
     cairo_get_matrix(cr, &matrix);
 
     // clear window. This is needed for some pdf's, probably just bad ones that I find.
-    top = left = 0;
-    right = win_width;
-    bottom = win_height;
+
+    cairo_surface_t *source_surface;
+    cairo_pattern_t *pattern = NULL;
+    pattern = cairo_get_source(cr);
+    if (pattern == NULL)
+        printf("No pattern...\n");
+    if (cairo_pattern_get_surface(pattern, &source_surface) != CAIRO_STATUS_SUCCESS)
+        printf("I fucked up\n");
+    cairo_surface_t *full_surface = 
+        cairo_surface_create_for_rectangle(source_surface, 0, 0, win_width - 100, win_height - 100);
+    
     cairo_set_source_rgb(cr, BACKGROUND_R, BACKGROUND_G, BACKGROUND_B);
-    cairo_fill_extents(cr, &left, &top, &right, &bottom);
+    cairo_set_source_surface(cr, full_surface, 0, 0);
     cairo_fill(cr);
     cairo_paint(cr);
 
@@ -228,7 +287,28 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
 
     cairo_translate(cr, xoffset, yoffset * win_height / STEPS);
     cairo_scale(cr, scalex, scaley);
-
+  
+/*    if (search_n != 0) {
+        GList *list = poppler_page_find_text(page, search_text);
+      
+        printf("%i %i\n", win_width, win_height);
+        if (list != NULL) {
+            for (i = 0; i < g_list_length(list); i++) {
+                PopplerRectangle *rect = (PopplerRectangle*) g_list_nth(list, i);
+ */               
+                /*double x1 = 0.001;//rect->x1;
+                double y1 = 0.001;//rect->y1;
+                double x2 = 0.002;//rect->x2;
+                double y2 = 0.002;//rect->y2;
+                cairo_set_source_rgb(cr, 0, BACKGROUND_G, 0.7);
+                cairo_fill_extents(cr, &x1, &y1, &x2, &y2);
+                cairo_fill(cr);
+                cairo_paint(cr); */
+ /*           }
+            printf("There are %i on this page\n", g_list_length(list));
+        }
+    }
+*/
     poppler_page_render(page, cr);
 
     if (yoffset < 0 && next) {
@@ -276,7 +356,6 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
         page = poppler_document_get_page(doc, current);
         if (!page) {
             puts("Could not open page of document");
-            g_object_unref(page);
             exit(EXIT_FAILURE);
         }
 
@@ -333,7 +412,8 @@ int main(int argc, char **argv) {
         g_object_unref(doc);
         exit(EXIT_FAILURE);
     }
-    
+   
+    search_n = 0;
     get_current_page();
    
     page = poppler_document_get_page(doc, current);
