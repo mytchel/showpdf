@@ -48,7 +48,7 @@ struct key keys[] = {
   { GDK_h, step_h, +1},
   { GDK_l, step_h, -1},
   
-  { GDK_J, page_m, 1},
+  { GDK_J, page_m, +1},
   { GDK_K, page_m, -1},
   { GDK_Page_Down, page_m, 1},
   { GDK_Page_Up, page_m, -1},
@@ -94,7 +94,7 @@ void page_m(int d) {
   if (d > 0 && current < npages - 1 - d)
     current += d;
   else if (d < 0 && current > d)
-    current -= d;
+    current += d;
 }
 
 void quit() {
