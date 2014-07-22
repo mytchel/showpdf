@@ -63,14 +63,16 @@ struct key keys[] = {
   { GDK_q, quit},
 };
 
-PopplerDocument *doc;
-PopplerPage *page, *prev, *next;
-gint win_width, win_height;
-int pages, current, oldcurrent = -1;
-int yoffset, xoffset;
 gchar *file_name;
-double page_width, page_height;
+PopplerDocument *doc;
+PopplerPage **pages;
 
+double page_width, page_height;
+gint win_width, win_height;
+
+int current, oldcurrent, npages;
+
+double yoffset, xoffset;
 double scale;
 
 void step_v(int d) {
@@ -85,14 +87,16 @@ void step_h(int d) {
 void center() {
   xoffset = 0;
   yoffset = 0;
+  scale = win_width / page_width;
 }
 
 void page_m(int d) {
-  if (d > 0 && current < pages - 1 - d)
+  if (d > 0 && current < npages - 1 - d)
     current += d;
   else if (d < 0 && current > d)
     current -= d;
 }
+
 void quit() {
   on_destroy(NULL, NULL);
 }
@@ -102,7 +106,7 @@ void start() {
 }
 
 void end() {
-  current = pages - 1;
+  current = npages - 1;
 }
 
 void zoom(int direction) {
@@ -193,15 +197,18 @@ void on_destroy(GtkWidget *w, gpointer data) {
 
 gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
   double left, right, top, bottom;
+  int i;
+  cairo_matrix_t startmatrix, scaledmatrix;
+  cairo_t *cr;
    
   // This causes the expose event to be triggered repeatidly on slackware (but not arch) causing
   // a noticable lag. So I've removed it for now.
   //gtk_widget_queue_draw(w);
   gtk_window_get_size(GTK_WINDOW(w), &win_width, &win_height);
-    
-  cairo_t *cr = gdk_cairo_create(w->window);
-  cairo_matrix_t matrix;
-  cairo_get_matrix(cr, &matrix);
+  poppler_page_get_size(pages[current], &page_width, &page_height);
+  
+  cr = gdk_cairo_create(w->window);
+  cairo_get_matrix(cr, &startmatrix);
   
   // clear window. This is needed for some pdf's, probably just bad ones that I find.
   top = left = 0;
@@ -211,25 +218,39 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
   cairo_fill_extents(cr, &left, &top, &right, &bottom);
   cairo_fill(cr);
   cairo_paint(cr);
- 
-  cairo_translate(cr, (double) xoffset * win_width / STEPS, (double) yoffset * win_height / STEPS);
-  double scalex = (win_width / page_width) * scale;
-  cairo_scale(cr, scalex, scalex);
-  
-  poppler_page_render(page, cr);
-  
-  if (yoffset < 0 && next) {
-    cairo_translate(cr, 0, page_height);
-    poppler_page_render(next, cr);
-  } else if (prev) {
-    cairo_translate(cr, 0, -page_height);
-    poppler_page_render(prev, cr);
-  }
-  
-  cairo_set_matrix(cr,&matrix);
 
+  cairo_scale(cr, scale, scale);
+  cairo_translate(cr, xoffset * page_width / STEPS, yoffset * page_height / STEPS);
+  cairo_get_matrix(cr, &scaledmatrix);
+  
+  poppler_page_render(pages[current], cr);
+
+  double realy = yoffset * page_width / STEPS * scale;
+
+  // Render pages before current that can be seen.
+  i = 1;
+  do {
+    if (current - i < 0) break;
+    cairo_translate(cr, 0, -page_height);
+    poppler_page_render(pages[current - i], cr);
+    i++;
+  } while (realy - i * page_height * scale > 0);
+  
+  cairo_set_matrix(cr, &scaledmatrix);
+
+  // Render pages after current that can be seen.
+  i = 1;
+  do {
+    if (current + i > npages) break;
+    cairo_translate(cr, 0, page_height);
+    poppler_page_render(pages[current + i], cr);
+    i++;
+  } while (realy + i * page_height * scale < win_height);
+
+  cairo_set_matrix(cr, &startmatrix);
+  
   char message[512];
-  sprintf(message, "Page %i of %i", current, pages);
+  sprintf(message, "Page %i of %i", current, npages);
   
   cairo_move_to(cr, 10, win_height - 10);
   cairo_set_source_rgb(cr, 0, 0, 0);
@@ -253,40 +274,66 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
 
   if (yoffset < 0) {
     yoffset = STEPS - 1;
-    if (current < pages - 1)
+    if (current < npages - 1)
       current++;
-  } else if (yoffset > STEPS) {
-    yoffset = 1;
+  } else if (yoffset >= STEPS) {
+    yoffset = 0;
     if (current > 0) 
       current--;
   }
-  
-  if (oldcurrent != current) {
-    g_object_unref(page);
-    page = poppler_document_get_page(doc, current);
-    if (!page) {
-      puts("Could not open page of document");
-      exit(EXIT_FAILURE);
-    }
-    
-    if (prev)
-      g_object_unref(prev);
-    if (next)
-      g_object_unref(next);
-    prev = next = NULL;
-    if (current > 0)
-      prev = poppler_document_get_page(doc, current - 1);
-    if (current < pages -1)
-      next = poppler_document_get_page(doc, current + 1);
-    
-    poppler_page_get_size(page, &page_width, &page_height);
-    
-    oldcurrent = current;
-  }
-  
+
   on_expose(w, NULL, NULL);
   
   return FALSE;
+}
+
+void load() {
+  int i;
+  GError *err = NULL;
+ 
+  gchar *uri = g_filename_to_uri (file_name, NULL, &err);
+  if (uri == NULL) {
+    printf("poppler fail: %s\n", err->message);
+    exit(EXIT_FAILURE);
+  }
+
+  doc = poppler_document_new_from_file(uri, NULL, &err);
+
+  if (!doc) {
+    puts(err->message);
+    g_object_unref(doc);
+    exit(EXIT_FAILURE);
+  }
+
+  npages = poppler_document_get_n_pages(doc);  
+
+  pages = malloc(sizeof(PopplerPage*) * npages);
+ 
+  for (i = 0; i < npages; i++) {
+    pages[i] = poppler_document_get_page(doc, i);
+
+    if (!pages[i]) {
+      printf("Could not open %i'th page of document", i);
+      g_object_unref(pages[i]);
+      exit(EXIT_FAILURE);
+    }
+  }
+  
+  oldcurrent = -1;
+  scale = 1;
+  xoffset = 0;
+  yoffset = 0;
+
+  get_current_page();
+}
+
+void unload() {
+  int i;
+
+  for (i = 0; i < npages; i++)
+    g_object_unref(pages[i]);
+  
+  g_object_unref(doc);
 }
 
 int main(int argc, char **argv) {
@@ -296,8 +343,7 @@ int main(int argc, char **argv) {
   }
   
   gtk_init(&argc, &argv);
-  GError *err = NULL;
-  
+
   gchar *filename = argv[1], *absolute;
   if (g_path_is_absolute(filename)) {
     absolute = g_strdup (filename);
@@ -309,35 +355,7 @@ int main(int argc, char **argv) {
   
   file_name = g_strdup(absolute);
 
-  scale = 1;
-  xoffset = 0;
-  yoffset = 0;
-  
-  gchar *uri = g_filename_to_uri (absolute, NULL, &err);
-  free (absolute);
-  if (uri == NULL) {
-    printf("poppler fail: %s\n", err->message);
-    exit(EXIT_FAILURE);
-  }
-  
-  doc = poppler_document_new_from_file(uri, NULL, &err);
-  if (!doc) {
-    puts(err->message);
-    g_object_unref(doc);
-    exit(EXIT_FAILURE);
-  }
-  
-  get_current_page();
-  
-  page = poppler_document_get_page(doc, current);
-  if (!page) {
-    puts("Could not open first page of document");
-    g_object_unref(page);
-    exit(EXIT_FAILURE);
-  }
-  
-  poppler_page_get_size(page, &page_width, &page_height);
-  pages = poppler_document_get_n_pages(doc);
+  load();
   
   GtkWidget *win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   g_signal_connect(G_OBJECT(win), "destroy", G_CALLBACK(on_destroy), NULL);
@@ -346,8 +364,8 @@ int main(int argc, char **argv) {
   gtk_widget_set_app_paintable(win, TRUE);
   gtk_widget_show_all(win);
   gtk_main();
-  g_object_unref(page);
-  g_object_unref(doc);
+
+  unload();
   
   return 0;
 }
