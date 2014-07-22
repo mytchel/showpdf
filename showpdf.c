@@ -9,10 +9,6 @@
 
 #define LEN(X) (sizeof(X)/sizeof(*X))
 
-#define MODE_HEIGHT 1
-#define MODE_WIDTH  2
-#define MODE_FIT    3
-
 #define BACKGROUND_R 1
 #define BACKGROUND_G 1
 #define BACKGROUND_B 1
@@ -20,7 +16,7 @@
 // Number of steps in a page.
 #define STEPS 15
 
-#define PAGES_FILE "/home/mytchel/.config/showpdf"
+#define PAGES_FILE "/home/dbs/.config/showpdf"
 #define TMP_PAGES_FILE "/tmp/pages_file"
 
 typedef struct key key;
@@ -30,17 +26,14 @@ struct key {
   int arg;
 };
 
-void step_down();
-void step_up();
-void page_down();
-void page_up();
+void step_v(int d);
+void step_h(int d);
+void page_m(int d);
 void quit();
 void center();
 void start();
 void end();
-void set_mode(int m);
-void search();
-void search_next(int direction);
+void zoom(int ad);
 
 void get_current_page();
 void save_current_page();
@@ -49,63 +42,59 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data);
 gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data);
 
 struct key keys[] = {
-  { GDK_j, step_down, 0},
-  { GDK_k, step_up, 0},
+  { GDK_j, step_v, -1},
+  { GDK_k, step_v, +1},
+
+  { GDK_h, step_h, +1},
+  { GDK_l, step_h, -1},
   
-  { GDK_J, page_down, 0},
-  { GDK_K, page_up, 0},
-  { GDK_Page_Down, page_down, 0},
-  { GDK_Page_Up, page_up, 0},
-  
-  { GDK_slash, search, 0},
-  { GDK_n, search_next, 1},
-  { GDK_N, search_next, -1},
+  { GDK_J, page_m, 1},
+  { GDK_K, page_m, -1},
+  { GDK_Page_Down, page_m, 1},
+  { GDK_Page_Up, page_m, -1},
+
+  { GDK_plus, zoom, 1},
+  { GDK_minus, zoom, -1},
   
   { GDK_c, center, 0},
   { GDK_Home, start, 0},
   { GDK_End, end, 0},
-  { GDK_w, set_mode, MODE_WIDTH},
-  { GDK_h, set_mode, MODE_HEIGHT},
-  { GDK_f, set_mode, MODE_FIT},
   
   { GDK_q, quit},
 };
 
 PopplerDocument *doc;
 PopplerPage *page, *prev, *next;
-int pages, current, yoffset, oldcurrent = -1;
+gint win_width, win_height;
+int pages, current, oldcurrent = -1;
+int yoffset, xoffset;
 gchar *file_name;
 double page_width, page_height;
-int mode = MODE_HEIGHT;
 
-int *search_pages;
-int search_n, search_c;
-char *search_text;
+double scale;
 
-void step_down() {
-  yoffset--;
+void step_v(int d) {
+  yoffset += d;
 }
 
-void step_up() {
-  yoffset++;
+void step_h(int d) {
+  xoffset += d;
 }
 
-void page_down() {
-  if (current < pages - 1)
-    current++;
+// Not actually centering but fuck it.
+void center() {
+  xoffset = 0;
+  yoffset = 0;
 }
 
-void page_up() {
-  if (current > 0)
-    current--;
+void page_m(int d) {
+  if (d > 0 && current < pages - 1 - d)
+    current += d;
+  else if (d < 0 && current > d)
+    current -= d;
 }
-
 void quit() {
   on_destroy(NULL, NULL);
-}
-
-void center() {
-  yoffset = 0;
 }
 
 void start() {
@@ -116,46 +105,8 @@ void end() {
   current = pages - 1;
 }
 
-void set_mode(int m) {
-  mode = m;
-}
-
-void search() {
-  int p;
-  PopplerPage *check_page;
-  search_c = 0;
-  search_n = 0;
-  
-  search_text = "map";
-  
-  for (p = 0; p < pages; p++) {
-    check_page = poppler_document_get_page(doc, p);
-    if (!check_page) {
-      puts("Could not open page of document");
-      g_object_unref(page);
-      exit(EXIT_FAILURE);
-    }
-    
-    GList *list = poppler_page_find_text(check_page, search_text);
-    if (list != NULL) {
-      search_n++;
-      search_pages = realloc(search_pages, sizeof(int) * search_n);
-      search_pages[search_n - 1] = p;
-    } 
-    
-    g_object_unref(check_page);
-  }
-}
-
-void search_next(int direction) {
-  if (search_n == 0 || search_pages == NULL) return;
-  
-  if (direction > 0) search_c++;
-  else search_c--;
-  
-  if (search_c >= search_n) search_c = 0;
-  if (search_c < 0) search_n = search_n - 1;
-  current = search_pages[search_c]; 
+void zoom(int direction) {
+  scale += direction * 0.1;
 }
 
 void get_current_page() {
@@ -227,7 +178,7 @@ void save_current_page() {
   }
   
   while ((fgets(line, sizeof(char) * 4096, tmp_file)) != NULL)
-    fprintf(page_file, line);
+    fprintf(page_file, "%s", line);
   
   fclose(page_file);
   fclose(tmp_file);
@@ -241,45 +192,29 @@ void on_destroy(GtkWidget *w, gpointer data) {
 }
 
 gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
-  double scalex = 1, scaley = 1;
-  int xoffset;
   double left, right, top, bottom;
-  int i;
-  
+   
   // This causes the expose event to be triggered repeatidly on slackware (but not arch) causing
   // a noticable lag. So I've removed it for now.
   //gtk_widget_queue_draw(w);
-  gint win_width, win_height;
   gtk_window_get_size(GTK_WINDOW(w), &win_width, &win_height);
-  
-  switch (mode) {
-  case MODE_HEIGHT: scalex = scaley = win_height / page_height; break;
-  case MODE_WIDTH:  scalex = scaley  = win_width  / page_width;  break;
-  case MODE_FIT:
-    scalex = win_width / page_width;
-    scaley = win_height / page_height;
-    break;
-  }
-  
+    
   cairo_t *cr = gdk_cairo_create(w->window);
   cairo_matrix_t matrix;
   cairo_get_matrix(cr, &matrix);
   
   // clear window. This is needed for some pdf's, probably just bad ones that I find.
-    top = left = 0;
+  top = left = 0;
   right = win_width;
   bottom = win_height;
   cairo_set_source_rgb(cr, BACKGROUND_R, BACKGROUND_G, BACKGROUND_B);
   cairo_fill_extents(cr, &left, &top, &right, &bottom);
   cairo_fill(cr);
   cairo_paint(cr);
-  
-  xoffset = 0;
-  if (page_width * scalex < win_width)
-    xoffset = win_width / 2 - page_width * scalex / 2;
-  
-  cairo_translate(cr, xoffset, yoffset * win_height / STEPS);
-  cairo_scale(cr, scalex, scaley);
+ 
+  cairo_translate(cr, (double) xoffset * win_width / STEPS, (double) yoffset * win_height / STEPS);
+  double scalex = (win_width / page_width) * scale;
+  cairo_scale(cr, scalex, scalex);
   
   poppler_page_render(page, cr);
   
@@ -292,28 +227,7 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
   }
   
   cairo_set_matrix(cr,&matrix);
-  /*
-  if (search_n != 0) {
-    GList *list = poppler_page_find_text(page, search_text);
-    
-    printf("%i %i\n", win_width, win_height);
-    if (list != NULL) {
-      for (i = 0; i < g_list_length(list); i++) {
-	PopplerRectangle *rect = (PopplerRectangle*) g_list_nth(list, i);
-    
-	double x1 = 0.0001;//rect->x1;
-	double y1 = 0.0001;//rect->y1;
-	double x2 = 0.0002;//rect->x2;
-	double y2 = 0.0002;//rect->y2;
-	cairo_set_source_rgb(cr, 0, BACKGROUND_G, 0.7);
-	cairo_fill_extents(cr, &x1, &y1, &x2, &y2);
-	cairo_fill(cr);
-	cairo_paint(cr);
-      }
-      printf("There are %i on this page\n", g_list_length(list));
-    }
-  }
-    */
+
   char message[512];
   sprintf(message, "Page %i of %i", current, pages);
   
@@ -394,6 +308,10 @@ int main(int argc, char **argv) {
   }
   
   file_name = g_strdup(absolute);
+
+  scale = 1;
+  xoffset = 0;
+  yoffset = 0;
   
   gchar *uri = g_filename_to_uri (absolute, NULL, &err);
   free (absolute);
@@ -409,7 +327,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
   
-  search_n = 0;
   get_current_page();
   
   page = poppler_document_get_page(doc, current);
