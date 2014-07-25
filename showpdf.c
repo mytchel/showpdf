@@ -16,7 +16,7 @@
 // Number of steps in a page.
 #define STEPS 15
 
-#define PAGES_FILE "/home/dbs/.config/showpdf"
+#define PAGE_FILE ".config/showpdf"
 #define TMP_PAGES_FILE "/tmp/pages_file"
 
 typedef struct key key;
@@ -45,8 +45,8 @@ struct key keys[] = {
   { GDK_j, step_v, -1},
   { GDK_k, step_v, +1},
 
-  { GDK_h, step_h, +1},
-  { GDK_l, step_h, -1},
+  { GDK_h, step_h, -1},
+  { GDK_l, step_h, +1},
   
   { GDK_J, page_m, +1},
   { GDK_K, page_m, -1},
@@ -63,6 +63,7 @@ struct key keys[] = {
   { GDK_q, quit},
 };
 
+char *page_save_file;
 gchar *file_name;
 PopplerDocument *doc;
 PopplerPage **pages;
@@ -120,12 +121,12 @@ void get_current_page() {
   
   current = 0;
   
-  page_file = fopen(PAGES_FILE, "r");
+  page_file = fopen(page_save_file, "r");
   if (!page_file) {
     printf("No saved page file!!!\n");
-    page_file = fopen(PAGES_FILE, "w");
+    page_file = fopen(page_save_file, "w");
     if (!page_file)
-      printf("Could not write to \"%s\"\n", PAGES_FILE);
+      printf("Could not write to \"%s\"\n", page_save_file);
     else
       fclose(page_file);
     return;
@@ -149,7 +150,7 @@ void save_current_page() {
   char line[4096], *name;
   int page_num;
   
-  page_file = fopen(PAGES_FILE, "r");
+  page_file = fopen(page_save_file, "r");
   tmp_file = fopen(TMP_PAGES_FILE, "w");
   if (!page_file || !tmp_file) {
     printf("ERROR opening files for saving current page\n");
@@ -174,7 +175,7 @@ void save_current_page() {
   fclose(page_file);
   fclose(tmp_file);
   
-  page_file = fopen(PAGES_FILE, "w");
+  page_file = fopen(page_save_file, "w");
   tmp_file = fopen(TMP_PAGES_FILE, "r");
   if (!page_file || !tmp_file) {
     printf("ERROR opening files for saving current page\n");
@@ -341,6 +342,9 @@ int main(int argc, char **argv) {
     printf("Usage: %s FILE\n", argv[0]);
     exit(EXIT_FAILURE);
   }
+
+  page_save_file = malloc(sizeof(char) * 1000);
+  sprintf(page_save_file, "%s/%s", getenv("HOME"), PAGE_FILE);
   
   gtk_init(&argc, &argv);
 
