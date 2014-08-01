@@ -30,6 +30,7 @@ void step_v(int d);
 void step_h(int d);
 void page_m(int d);
 void quit();
+void zoom_center();
 void center();
 void start();
 void end();
@@ -56,6 +57,7 @@ struct key keys[] = {
   { GDK_plus, zoom, 1},
   { GDK_minus, zoom, -1},
   
+  { GDK_C, zoom_center, 0},
   { GDK_c, center, 0},
   { GDK_Home, start, 0},
   { GDK_End, end, 0},
@@ -84,11 +86,13 @@ void step_h(int d) {
   xoffset += d;
 }
 
-// Not actually centering but fuck it.
 void center() {
-  xoffset = 0;
-  yoffset = 0;
+  xoffset = ((win_width / 2) - (page_width * scale / 2)) / (page_width * scale / STEPS);
+}
+
+void zoom_center() {
   scale = win_width / page_width;
+  center();
 }
 
 void page_m(int d) {
