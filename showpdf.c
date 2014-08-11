@@ -1,5 +1,5 @@
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <poppler.h>
 #include <gtk/gtk.h>
@@ -66,7 +66,10 @@ struct key keys[] = {
 };
 
 char *page_save_file;
+
 gchar *file_name;
+char *md5sum;
+
 PopplerDocument *doc;
 PopplerPage **pages;
 
@@ -116,83 +119,6 @@ void end() {
 
 void zoom(int direction) {
   scale += direction * 0.1;
-}
-
-void get_current_page() {
-  char line[4096];
-  char *name, *page_str;
-  FILE *page_file;
-  
-  current = 0;
-  
-  page_file = fopen(page_save_file, "r");
-  if (!page_file) {
-    printf("No saved page file!!!\n");
-    page_file = fopen(page_save_file, "w");
-    if (!page_file)
-      printf("Could not write to \"%s\"\n", page_save_file);
-    else
-      fclose(page_file);
-    return;
-  }
-  
-  while ((fgets(line, sizeof(char) * 4096, page_file)) != NULL) {
-    name = strtok(line, ":");
-    page_str = strtok(NULL, ":");
-    
-    if (strcmp(name, file_name) == 0) {
-      current = atoi(page_str);
-      break;
-    }
-  }
-  
-  fclose(page_file);
-}
-
-void save_current_page() {
-  FILE *page_file, *tmp_file;
-  char line[4096], *name;
-  int page_num;
-  
-  page_file = fopen(page_save_file, "r");
-  tmp_file = fopen(TMP_PAGES_FILE, "w");
-  if (!page_file || !tmp_file) {
-    printf("ERROR opening files for saving current page\n");
-    return;
-  }
-  
-  while ((fgets(line, sizeof(char) * 4096, page_file)) != NULL) {
-    name = strtok(line, ":");
-    page_num = atoi(strtok(NULL, ":"));
-    
-    if (strcmp(name, file_name) == 0) {
-      page_num = current;
-      current = -1;
-    }
-    
-    fprintf(tmp_file, "%s:%i\n", name, page_num);
-  }
-  
-  if (current != -1)
-    fprintf(tmp_file, "%s:%i\n", file_name, current);
-  
-  fclose(page_file);
-  fclose(tmp_file);
-  
-  page_file = fopen(page_save_file, "w");
-  tmp_file = fopen(TMP_PAGES_FILE, "r");
-  if (!page_file || !tmp_file) {
-    printf("ERROR opening files for saving current page\n");
-    return;
-  }
-  
-  while ((fgets(line, sizeof(char) * 4096, tmp_file)) != NULL)
-    fprintf(page_file, "%s", line);
-  
-  fclose(page_file);
-  fclose(tmp_file);
-  
-  remove(TMP_PAGES_FILE);
 }
 
 void on_destroy(GtkWidget *w, gpointer data) {
@@ -292,13 +218,96 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
   return FALSE;
 }
 
+void get_current_page() {
+  if (strcmp(md5sum, "") == 0)
+    return;
+  
+  char line[4096];
+  char *name, *page_str;
+  FILE *page_file;
+  
+  current = 0;
+  
+  page_file = fopen(page_save_file, "r");
+  if (!page_file) {
+    printf("No saved page file!!!\n");
+    page_file = fopen(page_save_file, "w");
+    if (!page_file)
+      printf("Could not write to \"%s\"\n", page_save_file);
+    else
+      fclose(page_file);
+    return;
+  }
+  
+  while ((fgets(line, sizeof(char) * 4096, page_file)) != NULL) {
+    name = strtok(line, ":");
+    page_str = strtok(NULL, ":");
+    
+    if (strcmp(name, md5sum) == 0) {
+      current = atoi(page_str);
+      break;
+    }
+  }
+  
+  fclose(page_file);
+}
+
+void save_current_page() {
+  if (strcmp(md5sum, "") == 0)
+    return;
+  
+  FILE *page_file, *tmp_file;
+  char line[4096], *name;
+  int page_num;
+  
+  page_file = fopen(page_save_file, "r");
+  tmp_file = fopen(TMP_PAGES_FILE, "w");
+  if (!page_file || !tmp_file) {
+    printf("ERROR opening files for saving current page\n");
+    return;
+  }
+  
+  while ((fgets(line, sizeof(char) * 4096, page_file)) != NULL) {
+    name = strtok(line, ":");
+    page_num = atoi(strtok(NULL, ":"));
+    
+    if (strcmp(name, md5sum) == 0) {
+      page_num = current;
+      current = -1;
+    }
+    
+    fprintf(tmp_file, "%s:%i\n", name, page_num);
+  }
+  
+  if (current != -1)
+    fprintf(tmp_file, "%s:%i\n", md5sum, current);
+  
+  fclose(page_file);
+  fclose(tmp_file);
+  
+  page_file = fopen(page_save_file, "w");
+  tmp_file = fopen(TMP_PAGES_FILE, "r");
+  if (!page_file || !tmp_file) {
+    printf("ERROR opening files for saving current page\n");
+    return;
+  }
+  
+  while ((fgets(line, sizeof(char) * 4096, tmp_file)) != NULL)
+    fprintf(page_file, "%s", line);
+  
+  fclose(page_file);
+  fclose(tmp_file);
+  
+  remove(TMP_PAGES_FILE);
+}
+
 void load() {
   int i;
   GError *err = NULL;
  
   gchar *uri = g_filename_to_uri (file_name, NULL, &err);
   if (uri == NULL) {
-    printf("poppler fail: %s\n", err->message);
+    printf("Could not open file: %s\n", err->message);
     exit(EXIT_FAILURE);
   }
 
@@ -342,6 +351,10 @@ void unload() {
 }
 
 int main(int argc, char **argv) {
+  int i;
+  FILE *p;
+  char sumcommand[1025];
+
   if (argc != 2) {
     printf("Usage: %s FILE\n", argv[0]);
     exit(EXIT_FAILURE);
@@ -352,16 +365,22 @@ int main(int argc, char **argv) {
   
   gtk_init(&argc, &argv);
 
-  gchar *filename = argv[1], *absolute;
-  if (g_path_is_absolute(filename)) {
-    absolute = g_strdup (filename);
+  file_name = g_strdup(argv[1]);
+
+  sprintf(sumcommand, "md5sum \"%s\" | grep -E -o \"^\\w*\"", file_name);
+  p = popen(sumcommand, "r");
+  if (p) {
+    md5sum = malloc(sizeof(char) * 64);
+    if (!fgets(md5sum, sizeof(char) * 64, p))
+      md5sum = "";
+    else {
+      for (i = 0; md5sum[i] != '\n'; i++);
+      md5sum[i] = '\0';
+    }
   } else {
-    gchar *dir = g_get_current_dir ();
-    absolute = g_build_filename (dir, filename, (gchar *) 0);
-    free (dir);
+    printf("Could not get md5sum of file, will not be able to save your page\n");
+    md5sum = "";
   }
-  
-  file_name = g_strdup(absolute);
 
   load();
   

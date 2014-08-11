@@ -1,6 +1,9 @@
 showpdf
 =======
 
-A GTK pdf viewer. Is is my own pdf viewer.
+A GTK pdf viewer.
 
-I'm adding some stuff to it like remembering what page you are on (working, codes bad though) and whatever else seems interesting, maybe a search.
+It is a fork of showpdf by https://github.com/jailop that he seem's to have taken down. I thank him for having released the code that he did.
+
+I've added some features. Good scrolling/paging, zooming, page numbers and remembering what page you are on when you close it.
+I'll probably add some other stuff, whatever seems interesting. I'd like to be able to search so that might turn up at some point.
