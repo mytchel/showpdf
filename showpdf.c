@@ -91,7 +91,7 @@ void center() {
 }
 
 void zoom_center() {
-  scale = win_width / page_width;
+  scale = win_height / page_height;
   center();
 }
 
