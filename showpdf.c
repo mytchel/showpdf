@@ -96,9 +96,9 @@ void zoom_center() {
 }
 
 void page_m(int d) {
-  if (d > 0 && current < npages - 1 - d)
+  if (d > 0 && current + d < npages)
     current += d;
-  else if (d < 0 && current > d)
+  else if (d < 0 && current + d >= 0)
     current += d;
 }
 
@@ -246,7 +246,7 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
   // Render pages after current that can be seen.
   i = 1;
   do {
-    if (current + i > npages) break;
+    if (current + i >= npages) break;
     cairo_translate(cr, 0, page_height);
     poppler_page_render(pages[current + i], cr);
     i++;
@@ -267,15 +267,14 @@ gboolean on_expose(GtkWidget *w, GdkEventExpose *e, gpointer data) {
 
 gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
   int i;
-  int q = 0;
   for (i = 0; i < LEN(keys); i++) {
     if (keys[i].key == e->key.keyval) {
       keys[i].function(keys[i].arg);
-      if (keys[i].function == quit) q = 1;
+      if (keys[i].function == quit)
+	return FALSE;
       break;
     }
   }
-  if (q) return FALSE;
 
   if (yoffset < 0) {
     yoffset = STEPS - 1;
@@ -283,7 +282,7 @@ gboolean on_keypress(GtkWidget *w, GdkEvent *e, gpointer data) {
       current++;
   } else if (yoffset >= STEPS) {
     yoffset = 0;
-    if (current > 0) 
+    if (current > 0)
       current--;
   }
 
